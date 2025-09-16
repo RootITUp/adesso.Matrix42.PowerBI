@@ -8,19 +8,26 @@ SELECT
      welche an eine NICHT-First-Level-Support-Rolle weitergeleitet wurden. 
      */
     CASE
-        WHEN COUNT(journal.[Expression-ObjectID]) = 0 THEN 1
+        WHEN ticketCommon.State = 204
+        AND COUNT(journal.[Expression-ObjectID]) = 0 THEN 1
         ELSE 0
-    END AS IsFirstLevelSupportResolution
+    END AS IsFirstLevelSupportResolution,
+    /*
+     Die Bedingung ist wahr, wenn es mindestens eine historische Aktion vom Typ "Weiterleitung an Rolle" gibt,
+     welche an eine NICHT-First-Level-Support-Rolle weitergeleitet wurde. 
+     */
+    CASE
+        WHEN COUNT(journal.[Expression-ObjectID]) > 0 THEN 1
+        ELSE 0
+    END AS IsEscalated
 FROM
     dbo.SPSActivityClassBase AS ticket
     LEFT OUTER JOIN (
         SELECT
-            [Expression-ObjectID]
+            [Expression-ObjectID],
+            State
         FROM
             dbo.SPSCommonClassBase
-        WHERE
-            /* Nur Tickets im Status "Geschlossen" */
-            State = 204
     ) AS ticketCommon ON ticket.[Expression-ObjectID] = ticketCommon.[Expression-ObjectID]
     /* Wir erzeugen Zeilen, in welcher entweder (NULL) oder die KPI verletzende Weiterleitungs-Aktion vorkommt. */
     LEFT OUTER JOIN (
@@ -43,5 +50,6 @@ FROM
     ) AS journal ON ticketCommon.[Expression-ObjectID] = journal.[Expression-ObjectID]
 GROUP BY
     -- ticket.[Expression-ObjectID], -- Uncomment if ObjectID is needed (Warning: performance impact)
+    ticketCommon.State,
     ticket.ID,
     ticket.ClosedDate;
