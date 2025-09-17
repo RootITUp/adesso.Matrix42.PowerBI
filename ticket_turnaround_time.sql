@@ -10,24 +10,30 @@ WITH ServiceLevel2TimeProfile(
     TimeZoneId
 ) AS (
     SELECT
-        slaWithMinProfile.ID,
-        slaWithMinProfile.TimeProfileObjectID,
-        serviceTimeProfile.Country,
-        timeZonePickup.TimeZoneId
+        ID,
+        TimeProfileObjectID,
+        Country,
+        TimeZoneId
     FROM
         (
             SELECT
                 serviceLevelAgreement.ID,
-                MIN(serviceTimeProfile.[Expression-ObjectID]) AS TimeProfileObjectID
+                serviceTimeProfile.[Expression-ObjectID] AS TimeProfileObjectID,
+                serviceTimeProfile.Country,
+                timeZonePickup.TimeZoneId,
+                ROW_NUMBER() OVER(
+                    PARTITION BY serviceLevelAgreement.ID
+                    ORDER BY
+                        serviceTimeProfile.[Expression-ObjectID] ASC
+                ) as ranking
             FROM
                 dbo.SVCServiceLevelAgreementClassBase AS serviceLevelAgreement
                 INNER JOIN dbo.SVCServiceLevelAgreementClassServiceLevels AS slaLevel ON serviceLevelAgreement.[Expression-ObjectID] = slaLevel.[Expression-ObjectID]
                 INNER JOIN dbo.SVMServiceTimeProfileClassBase AS serviceTimeProfile ON slaLevel.ServiceTimeProfile = serviceTimeProfile.ID
-            GROUP BY
-                serviceLevelAgreement.ID
-        ) AS slaWithMinProfile
-        INNER JOIN dbo.SVMServiceTimeProfileClassBase AS serviceTimeProfile ON slaWithMinProfile.TimeProfileObjectID = serviceTimeProfile.[Expression-ObjectID]
-        INNER JOIN dbo.SPSLocationPickupTimeZone AS timeZonePickup ON serviceTimeProfile.TimeZone = timeZonePickup.Value
+                INNER JOIN dbo.SPSLocationPickupTimeZone AS timeZonePickup ON serviceTimeProfile.TimeZone = timeZonePickup.Value
+        ) AS RankedProfiles
+    WHERE
+        ranking = 1
 ),
 /*
  Konvertiert die Erstellungs- und Schließzeiten der Tickets in die lokale Zeit der SLA.
@@ -73,48 +79,17 @@ ServiceLevel2WorkingHours AS (
     GROUP BY
         sla2Profile.ID,
         timeConfig.WeekDayNumber
-),
-/*
- Ermittelt für jedes Ticket und jeden Tag zwischen Start- und Enddatum die Arbeitszeiten.
- Für den ersten und letzten Tag werden die Arbeitszeiten entsprechend der Start- und Endzeit angepasst.
- */
-Activites2WorkingHours AS (
-    SELECT
-        ticket.ID,
-        ticket.StartDateLocal,
-        ticket.EndDateLocal,
-        calendar.[Date],
-        CASE
-            WHEN calendar.[Date] = CAST(ticket.StartDateLocal AS DATE) THEN CASE
-                WHEN sla2Hours.WorkingFrom > CAST(ticket.StartDateLocal AS TIME) THEN sla2Hours.WorkingFrom
-                ELSE CAST(ticket.StartDateLocal AS TIME)
-            END
-            ELSE sla2Hours.WorkingFrom
-        END AS WorkingFrom,
-        CASE
-            WHEN calendar.[Date] = CAST(ticket.EndDateLocal AS DATE) THEN CASE
-                WHEN sla2Hours.WorkingUntil < CAST(ticket.EndDateLocal AS TIME) THEN sla2Hours.WorkingUntil
-                ELSE CAST(ticket.EndDateLocal AS TIME)
-            END
-            ELSE sla2Hours.WorkingUntil
-        END AS WorkingUntil
-    FROM
-        ActivitiesInLocalTime AS ticket
-        /*
-         Wichtig: Die Kalender-Tabelle muss ausreichend viele Daten enthalten, um alle Tage zwischen dem frühesten Startdatum und dem spätesten Enddatum der Tickets abzudecken.
-         Dies wird über das Installations-Skript sichergestellt.
-         */
-        INNER JOIN dbo.Ud_CalendarDateSeries AS calendar ON calendar.[Date] >= CAST(ticket.StartDateLocal AS DATE)
-        AND calendar.[Date] <= CAST(ticket.EndDateLocal AS DATE)
-        INNER JOIN ServiceLevel2WorkingHours AS sla2Hours ON sla2Hours.ID = ticket.SLA
-        AND sla2Hours.WeekDayNumber = calendar.WeekDayNumber
 )
 SELECT
     ticket.ID,
     ticket.StartDateLocal,
     ticket.EndDateLocal,
     CAST(
-        DATEDIFF(minute, ticket.StartDateLocal, ticket.EndDateLocal) / 60.0 AS DECIMAL(10, 2)
+        DATEDIFF(
+            minute,
+            ticket.StartDateLocal,
+            ticket.EndDateLocal
+        ) / 60.0 AS DECIMAL(10, 2)
     ) AS GrossTurnaroundHours,
     DATEDIFF(
         DAY,
@@ -123,12 +98,34 @@ SELECT
     ) + 1 AS GrossTurnaroundDays,
     CAST(
         SUM(
-            DATEDIFF(minute, ticket.WorkingFrom, ticket.WorkingUntil)
+            DATEDIFF(
+                minute,
+                -- Ermittelt die effektive Startzeit für den jeweiligen Tag
+                CASE
+                    WHEN calendar.[Date] = CAST(ticket.StartDateLocal AS DATE)
+                    AND sla2h.WorkingFrom < CAST(ticket.StartDateLocal AS TIME) THEN CAST(ticket.StartDateLocal AS TIME)
+                    ELSE sla2h.WorkingFrom
+                END,
+                -- Ermittelt die effektive Endzeit für den jeweiligen Tag
+                CASE
+                    WHEN calendar.[Date] = CAST(ticket.EndDateLocal AS DATE)
+                    AND sla2h.WorkingUntil > CAST(ticket.EndDateLocal AS TIME) THEN CAST(ticket.EndDateLocal AS TIME)
+                    ELSE sla2h.WorkingUntil
+                END
+            )
         ) / 60.0 AS DECIMAL(10, 2)
     ) AS NetTurnaroundHours,
-    COUNT(*) AS NetTurnaroundDays
+    COUNT(calendar.[Date]) AS NetTurnaroundDays
 FROM
-    Activites2WorkingHours AS ticket
+    ActivitiesInLocalTime AS ticket
+    /*
+     Wichtig: Die Kalender-Tabelle muss ausreichend viele Daten enthalten.
+     Dies wird über das Installations-Skript sichergestellt.
+     */
+    INNER JOIN dbo.Ud_CalendarDateSeries AS calendar ON calendar.[Date] BETWEEN CAST(ticket.StartDateLocal AS DATE)
+    AND CAST(ticket.EndDateLocal AS DATE)
+    INNER JOIN ServiceLevel2WorkingHours AS sla2h ON ticket.SLA = sla2h.ID
+    AND calendar.WeekDayNumber = sla2h.WeekDayNumber
 GROUP BY
     ticket.ID,
     ticket.StartDateLocal,
