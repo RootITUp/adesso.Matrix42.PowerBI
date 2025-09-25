@@ -1,3 +1,11 @@
+WITH FirstLevelSupportTeams(RoleID) AS (
+    SELECT
+        role.ID
+    FROM
+        dbo.SPSScRoleClassBase AS role
+    WHERE
+        role.Ud_SupportRoleType = 10 -- First-Level-Support
+)
 SELECT
     ticket.ID,
     ticket.ClosedDate,
@@ -44,8 +52,10 @@ FROM
                 '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
                 'uniqueidentifier'
             ) NOT IN (
-                /* Liste der First-Level-Support-Rollen, als IDs der SPSScRoleClassBase */
-                '74f788df-1d40-e911-c1a2-005056858d73'
+                SELECT
+                    RoleID
+                FROM
+                    FirstLevelSupportTeams
             )
     ) AS journal ON ticketCommon.[Expression-ObjectID] = journal.[Expression-ObjectID]
 GROUP BY
