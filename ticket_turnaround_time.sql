@@ -102,30 +102,30 @@ SELECT
                 minute,
                 -- Ermittelt die effektive Startzeit für den jeweiligen Tag
                 CASE
-                    WHEN calendar.[Date] = CAST(ticket.StartDateLocal AS DATE)
+                    WHEN calendar.Ud_Date = CAST(ticket.StartDateLocal AS DATE)
                     AND sla2h.WorkingFrom < CAST(ticket.StartDateLocal AS TIME) THEN CAST(ticket.StartDateLocal AS TIME)
                     ELSE sla2h.WorkingFrom
                 END,
                 -- Ermittelt die effektive Endzeit für den jeweiligen Tag
                 CASE
-                    WHEN calendar.[Date] = CAST(ticket.EndDateLocal AS DATE)
+                    WHEN calendar.Ud_Date = CAST(ticket.EndDateLocal AS DATE)
                     AND sla2h.WorkingUntil > CAST(ticket.EndDateLocal AS TIME) THEN CAST(ticket.EndDateLocal AS TIME)
                     ELSE sla2h.WorkingUntil
                 END
             )
         ) / 60.0 AS DECIMAL(10, 2)
     ) AS NetTurnaroundHours,
-    COUNT(calendar.[Date]) AS NetTurnaroundDays
+    COUNT(calendar.Ud_Date) AS NetTurnaroundDays
 FROM
     ActivitiesInLocalTime AS ticket
     /*
      Wichtig: Die Kalender-Tabelle muss ausreichend viele Daten enthalten.
      Dies wird über das Installations-Skript sichergestellt.
      */
-    INNER JOIN dbo.Ud_CalendarDateSeries AS calendar ON calendar.[Date] BETWEEN CAST(ticket.StartDateLocal AS DATE)
+    INNER JOIN dbo.Ud_CalendarDateSeries AS calendar ON calendar.Ud_Date BETWEEN CAST(ticket.StartDateLocal AS DATE)
     AND CAST(ticket.EndDateLocal AS DATE)
     INNER JOIN ServiceLevel2WorkingHours AS sla2h ON ticket.SLA = sla2h.ID
-    AND calendar.WeekDayNumber = sla2h.WeekDayNumber
+    AND calendar.Ud_WeekDayNumber = sla2h.WeekDayNumber
 GROUP BY
     ticket.ID,
     ticket.StartDateLocal,
