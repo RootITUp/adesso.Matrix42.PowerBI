@@ -8,7 +8,6 @@ WITH FirstLevelSupportTeams(RoleID) AS (
 )
 SELECT
     ticket.ID,
-    ticket.ClosedDate,
     -- ticket.[Expression-ObjectID] AS ObjectID, -- Uncomment if ObjectID is needed (Warning: performance impact)
     /* 
      Die Bedingung ist wahr, wenn das Ticket im Status "Geschlossen" ist und
@@ -58,8 +57,9 @@ FROM
                     FirstLevelSupportTeams
             )
     ) AS journal ON ticketCommon.[Expression-ObjectID] = journal.[Expression-ObjectID]
+WHERE
+    ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window
 GROUP BY
     -- ticket.[Expression-ObjectID], -- Uncomment if ObjectID is needed (Warning: performance impact)
     ticketCommon.State,
-    ticket.ID,
-    ticket.ClosedDate;
+    ticket.ID;

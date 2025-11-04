@@ -1,6 +1,5 @@
 SELECT
     ticket.ID,
-    ticket.ClosedDate,
     -- ticket.[Expression-ObjectID] AS ObjectID, -- Uncomment if ObjectID is needed (Warning: performance impact)
     /*
      Die Bedingung ist wahr, wenn das Ticket im Status "Geschlossen" ist 
@@ -27,7 +26,8 @@ FROM
         journal.ActivityAction = 7
         OR journal.ActivityAction = 8
     ) -- 7 = Accept / Annehmen, 8 = Close / Schließen
+WHERE
+    ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window
 GROUP BY
     -- ticket.[Expression-ObjectID], -- Uncomment if ObjectID is needed (Warning: performance impact)
-    ticket.ID,
-    ticket.ClosedDate;
+    ticket.ID;

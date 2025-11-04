@@ -52,6 +52,7 @@ ActivitiesInLocalTime AS (
     WHERE
         ticket.SLA IS NOT NULL
         AND ticket.ClosedDate IS NOT NULL
+        AND ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window
 ),
 /*
  Ermittelt für eine SLA die Arbeitszeiten pro Wochentag.
