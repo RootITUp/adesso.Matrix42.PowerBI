@@ -1,25 +1,31 @@
 SELECT
     ticket.ID,
     -- ticket.[Expression-ObjectID] AS ObjectID, -- Uncomment if ObjectID is needed (Warning: performance impact)
+    CASE
+        WHEN ticketCommon.State = 204 THEN 1
+        ELSE 0
+    END AS IsClosed,
     /*
-     Die Bedingung ist wahr, wenn das Ticket im Status "Geschlossen" ist 
-     und die relevanten Aktionen (Annehmen und Schließen) historisch
-     nur von einer einzigen Person durchgeführt wurden.
+     Ein Ticket wurde im Single-Contact-Resolution-Verfahren gelöst, wenn:
+     - das Ticket im Status "Geschlossen" ist UND
+     - alle relevanten Aktionen (Annehmen und Schließen) historisch nur von einer einzigen Person durchgeführt wurden.
      */
     CASE
-        WHEN COUNT(DISTINCT journal.Creator) <= 1 THEN 1
+        WHEN ticketCommon.State = 204
+        AND COUNT(DISTINCT journal.Creator) <= 1 THEN 1
         ELSE 0
     END AS IsSingleContactResolution
 FROM
     dbo.SPSActivityClassBase AS ticket
-    LEFT OUTER JOIN (
+    /*
+     Verknüpfung mit den Ticket-Metadaten, um den aktuellen Status zu erhalten.
+     */
+    INNER JOIN (
         SELECT
-            [Expression-ObjectID]
+            [Expression-ObjectID],
+            State
         FROM
             dbo.SPSCommonClassBase
-        WHERE
-            /* Nur Tickets im Status "Geschlossen" */
-            State = 204
     ) AS ticketCommon ON ticket.[Expression-ObjectID] = ticketCommon.[Expression-ObjectID]
     LEFT OUTER JOIN dbo.SPSActivityClassUnitOfWork AS journal ON ticketCommon.[Expression-ObjectID] = journal.[Expression-ObjectID]
     AND (
