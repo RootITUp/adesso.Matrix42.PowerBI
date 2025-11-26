@@ -48,22 +48,22 @@ SELECT
      - all relevant actions (Accepting, Closing, ...) were historically performed by a single person only.
      */
     CASE
-        WHEN ticketCommon.State = 204
+        WHEN TicketCommon.State = 204
         AND COUNT(DISTINCT ParticipatingUsers.UserId) <= 1 THEN 1
         ELSE 0
     END AS IsSingleContactResolution
 FROM
-    dbo.SPSActivityClassBase AS Ticket -- Join with a minimal set of common properties
+    dbo.SPSActivityClassBase AS Ticket
     INNER JOIN (
         SELECT
             [Expression-ObjectID],
             State
         FROM
             dbo.SPSCommonClassBase
-    ) AS ticketCommon ON ticket.[Expression-ObjectID] = ticketCommon.[Expression-ObjectID] -- Join with Participating Users to find ~all users involved with the ticket
-    INNER JOIN ParticipatingUsers ON ticket.[Expression-ObjectID] = ParticipatingUsers.TicketObjectId
+    ) AS TicketCommon ON Ticket.[Expression-ObjectID] = TicketCommon.[Expression-ObjectID] --Join with a minimal set of common properties 
+    INNER JOIN ParticipatingUsers ON Ticket.[Expression-ObjectID] = ParticipatingUsers.TicketObjectId -- Join with Participating Users to find ~all users involved with the ticket
 WHERE
-    ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window
+    Ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window
     AND (
         Ticket.UsedInTypeSPSActivityTypeTicket IS NOT NULL
         OR Ticket.UsedInTypeSPSActivityTypeIncident IS NOT NULL
@@ -71,5 +71,5 @@ WHERE
     )
     AND ParticipatingUsers.UserId IS NOT NULL
 GROUP BY
-    ticketCommon.State,
-    ticket.ID;
+    TicketCommon.State,
+    Ticket.ID;

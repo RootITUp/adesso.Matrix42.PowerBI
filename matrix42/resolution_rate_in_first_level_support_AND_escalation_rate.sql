@@ -1,117 +1,125 @@
-WITH FirstLevelSupportTeams(RoleID) AS (
+WITH FirstLevelSupportTeams(RoleId) AS (
+    /* 1. First-Level-Support Roles
+     Identifies all Roles classified as First-Level-Support.
+     These Role IDs are used to determine if a ticket was created for First-Level-Support
+     and whether it was escalated to higher support levels.
+     */
     SELECT
         role.ID
     FROM
         dbo.SPSScRoleClassBase AS role
     WHERE
         role.Ud_SupportRoleType = 10 -- First-Level-Support
-)
+),
+ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
+    /* 2. HISTORY OF ROLE ASSIGNMENTS
+     Reconstructs the timeline of which Role was assigned to a ticket and when.
+     Parses XML 'SolutionParams' to find the Target Role ID.
+     */
+    SELECT
+        [Expression-ObjectID],
+        CreatedDate,
+        TRY_CAST(SolutionParams AS XML).value(
+            '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
+            'uniqueidentifier'
+        )
+    FROM
+        SPSActivityClassUnitOfWork AS CreateJournal
+    WHERE
+        ActivityAction = 1 -- Ticket Creation in Service Desk
+        OR ActivityAction = 18 -- Ticket Creation in Self Service Portal
+    UNION
+    SELECT
+        [Expression-ObjectID],
+        CreatedDate,
+        TRY_CAST(SolutionParams AS XML).value(
+            '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
+            'uniqueidentifier'
+        )
+    FROM
+        SPSActivityClassUnitOfWork AS ForwardJournal
+    WHERE
+        ActivityAction = 3 -- Forward to Role
+        OR ActivityAction = 30 -- Forward to Role AND User
+    UNION
+    SELECT
+        [Expression-ObjectID],
+        CreatedDate,
+        TRY_CAST(SolutionParams AS XML).value(
+            '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[2]',
+            'uniqueidentifier'
+        )
+    FROM
+        SPSActivityClassUnitOfWork AS ChangeJournal
+    WHERE
+        ActivityAction = 74 -- Change Assigned Role From Old -> New
+    UNION
+    SELECT
+        [Expression-ObjectID],
+        COALESCE(ClosedDate, GETDATE()),
+        RecipientRole
+    FROM
+        SPSActivityClassBase
+    WHERE
+        RecipientRole IS NOT NULL
+),
+RankedParticipatingRoles(TicketObjectId, RoleId, RoleAssignmentRank) AS (
+    /* 3. RANKED ROLE ASSIGNMENTS
+     Assigns a rank to each Role assignment per Ticket based on the ValidFrom date.
+     This allows identifying the first assigned Role and any subsequent Role changes.
+     */
+    SELECT
+        TicketObjectId,
+        RoleId,
+        ROW_NUMBER() OVER (
+            PARTITION BY TicketObjectId
+            ORDER BY
+                ValidFrom ASC
+        ) AS RoleAssignmentRank
+    FROM
+        ParticipatingRoles
+    WHERE
+        RoleId IS NOT NULL -- this ASSUMES that for activity=18 (mail) a dispatch to a role happens BEFORE any work is performed!
+),
 SELECT
     ticket.ID,
-    -- ticket.[Expression-ObjectID] AS ObjectID, -- Uncomment if ObjectID is needed (Warning: performance impact)
     CASE
         WHEN ticketCommon.State = 204 THEN 1
         ELSE 0
     END AS IsClosed,
-    CASE
-        WHEN COUNT(
-            firstLevelTicketCreationJournal.[Expression-ObjectID]
-        ) > 0 THEN 1
-        ELSE 0
-    END AS IsCreatedForFirstLevelSupport,
     /*
-     Ein Ticket wurde im First-Level-Support gelöst, wenn:
-     - das Ticket im Status "Geschlossen" ist UND
-     - es keine historischen Aktionen vom Typ "Weiterleitung an Rolle" für eine NICHT-First-Level-Support-Rolle gibt UND
-     - die initiale Bearbeitungsrolle eine First-Level-Support-Rolle war
+     A ticket was created for First-Level-Support if:
+     - the first "relevant" role assigned to the ticket is a First-Level-Support role
      */
-    CASE
-        WHEN ticketCommon.State = 204
-        AND COUNT(
-            firstLevelTicketCreationJournal.[Expression-ObjectID]
-        ) > 0
-        AND COUNT(
-            secondLevelTicketForwardJournal.[Expression-ObjectID]
-        ) = 0 THEN 1
-        ELSE 0
-    END AS IsFirstLevelSupportResolution,
     /*
-     Ein Ticket wurde eskaliert, wenn:
-     - es mind. eine historischen Aktionen vom Typ "Weiterleitung an Rolle" für eine NICHT-First-Level-Support-Rolle gibt UND
-     - die initiale Bearbeitungsrolle eine First-Level-Support-Rolle war
+     A ticket was closed without escalation if:
+     - the ticket is in "Closed" status AND
+     - there are NO non-First-Level-Support role assignments in the ticket history
+     - the first "relevant" role assigned to the ticket is a First-Level-Support role
      */
-    CASE
-        WHEN COUNT(
-            secondLevelTicketForwardJournal.[Expression-ObjectID]
-        ) > 0
-        AND COUNT(
-            firstLevelTicketCreationJournal.[Expression-ObjectID]
-        ) > 0 THEN 1
-        ELSE 0
-    END AS IsEscalated
+    /*
+     A ticket was escalated if:
+     - there is at least one non-First-Level-Support role assignment in the ticket history
+     - the first "relevant" role assigned to the ticket is a First-Level-Support role
+     */
 FROM
-    dbo.SPSActivityClassBase AS ticket
-    /*
-     Verknüpfung mit den Ticket-Metadaten, um den aktuellen Status zu erhalten.
-     */
+    dbo.SPSActivityClassBase AS Ticket
     INNER JOIN (
         SELECT
             [Expression-ObjectID],
             State
         FROM
             dbo.SPSCommonClassBase
-    ) AS ticketCommon ON ticket.[Expression-ObjectID] = ticketCommon.[Expression-ObjectID]
-    /* 
-     Verknüpfung mit den Journal-Einträgen, um die Ticket-Erstellungs-Aktion zu identifizieren.
-     Ziel ist es zu prüfen, ob das Ticket ursprünglich für den First-Level-Support erstellt wurde.
-     */
-    LEFT OUTER JOIN (
-        SELECT
-            [Expression-ObjectID]
-        FROM
-            dbo.SPSActivityClassUnitOfWork
-        WHERE
-            /* Nur Journal-Einträge für "Erstellt"" */
-            ActivityAction = 1
-            AND
-            /* Nur Fragmente, WELCHE der SPSScRoleClassBase einer First-Level-Support-Rolle entsprechen */
-            CAST(SolutionParams AS XML).value(
-                '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
-                'uniqueidentifier'
-            ) IN (
-                SELECT
-                    RoleID
-                FROM
-                    FirstLevelSupportTeams
-            )
-    ) AS firstLevelTicketCreationJournal ON ticketCommon.[Expression-ObjectID] = firstLevelTicketCreationJournal.[Expression-ObjectID]
-    /*
-     Verknüpfung mit den Journal-Einträgen, um Weiterleitungs-Aktionen zu identifizieren.
-     Ziel ist es zu prüfen, ob das Ticket an eine NICHT-First-Level-Support-Rolle weitergeleitet (eskaliert) wurde.
-     */
-    LEFT OUTER JOIN (
-        SELECT
-            [Expression-ObjectID]
-        FROM
-            dbo.SPSActivityClassUnitOfWork
-        WHERE
-            /* Nur Journal-Einträge für "Weiterleitung an Rolle" */
-            ActivityAction = 3
-            AND
-            /* Nur Fragmente, welche NICHT der SPSScRoleClassBase einer First-Level-Support-Rolle entsprechen */
-            CAST(SolutionParams AS XML).value(
-                '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
-                'uniqueidentifier'
-            ) NOT IN (
-                SELECT
-                    RoleID
-                FROM
-                    FirstLevelSupportTeams
-            )
-    ) AS secondLevelTicketForwardJournal ON ticketCommon.[Expression-ObjectID] = secondLevelTicketForwardJournal.[Expression-ObjectID]
+    ) AS TicketCommon ON Ticket.[Expression-ObjectID] = TicketCommon.[Expression-ObjectID] --Join with a minimal set of common properties 
+    INNER JOIN RankedParticipatingRoles ON Ticket.[Expression-ObjectID] = RankedParticipatingRoles.TicketObjectId -- Join with Participating Users to find ~all users involved with the ticket
+    LEFT OUTER JOIN FirstLevelSupportTeams ON ParticipatingRoles.RoleId = FirstLevelSupportTeams.RoleId
 WHERE
-    ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window
+    Ticket.CreatedDate >= DATEADD(year, -3, GETDATE()) -- 3 year sliding window    
+    AND (
+        Ticket.UsedInTypeSPSActivityTypeTicket IS NOT NULL
+        OR Ticket.UsedInTypeSPSActivityTypeIncident IS NOT NULL
+        OR Ticket.UsedInTypeSPSActivityTypeServiceRequest IS NOT NULL
+    )
 GROUP BY
-    -- ticket.[Expression-ObjectID], -- Uncomment if ObjectID is needed (Warning: performance impact)
-    ticketCommon.State,
-    ticket.ID;
+    TicketCommon.State,
+    Ticket.ID;

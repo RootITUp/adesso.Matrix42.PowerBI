@@ -2,7 +2,7 @@ WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
     SELECT
         [Expression-ObjectID],
         CreatedDate,
-        CAST(SolutionParams AS XML).value(
+        TRY_CAST(SolutionParams AS XML).value(
             '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
             'uniqueidentifier'
         )
@@ -15,7 +15,7 @@ WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
     SELECT
         [Expression-ObjectID],
         CreatedDate,
-        CAST(SolutionParams AS XML).value(
+        TRY_CAST(SolutionParams AS XML).value(
             '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[1]',
             'uniqueidentifier'
         )
@@ -28,7 +28,7 @@ WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
     SELECT
         [Expression-ObjectID],
         CreatedDate,
-        CAST(SolutionParams AS XML).value(
+        TRY_CAST(SolutionParams AS XML).value(
             '(/parameters/JournalEntryParameterBase/FragmentIds/fragmentId)[2]',
             'uniqueidentifier'
         )

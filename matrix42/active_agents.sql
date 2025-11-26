@@ -1,5 +1,6 @@
 WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
-    /* 1. HISTORY OF ROLE ASSIGNMENTS
+    /* 
+     1. HISTORY OF ROLE ASSIGNMENTS
      Reconstructs the timeline of which Role was assigned to a ticket and when.
      Parses XML 'SolutionParams' to find the Target Role ID.
      */
@@ -14,7 +15,8 @@ WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
     FROM
         SPSActivityClassUnitOfWork AS CreateJournal
     WHERE
-        ActivityAction = 1 -- Ticket Creation (Service Desk) [18 from mail does not expose recipient role!]
+        ActivityAction = 1
+        OR ActivityAction = 19 -- Ticket Creation (Service Desk/SSP) [18 from mail does not expose recipient role!]
     UNION
     SELECT
         [Expression-ObjectID],
@@ -42,16 +44,29 @@ WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
         SPSActivityClassUnitOfWork AS ChangeJournal
     WHERE
         ActivityAction = 74 -- Change Assigned Role
-    UNION
+),
+PaddedParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
+    /*
+     2. PAD ROLE HISTORY
+     Adds a fallback entry for tickets that never had their role changed and no creation journal exists.
+     Uses the Ticket's RecipientRole as the initial role assignment date.
+     */
     SELECT
         [Expression-ObjectID],
-        COALESCE(ClosedDate, GETDATE()),
-        -- Fallback for active tickets
-        RecipientRole
+        COALESCE(
+            MAX(ParticipatingRoles.ValidFrom),
+            Ticket.CreatedDate
+        ),
+        Ticket.RecipientRole
     FROM
-        SPSActivityClassBase
+        ParticipatingRoles
+        INNER JOIN SPSActivityClassBase AS Ticket ON ParticipatingRoles.TicketObjectId = Ticket.[Expression-ObjectID]
     WHERE
-        RecipientRole IS NOT NULL
+        Ticket.RecipientRole IS NOT NULL
+    GROUP BY
+        [Expression-ObjectID],
+        Ticket.CreatedDate,
+        Ticket.RecipientRole
 ),
 AgentInteractions(
     TicketObjectId,
@@ -59,7 +74,7 @@ AgentInteractions(
     Creator
 ) AS (
     /*
-     2. AGENT ACTIVITY
+     3. AGENT ACTIVITY
      Filters the journal for specific manual actions (Edits, Emails, Closures)
      performed by agents within the last 3 years.
      */
@@ -108,7 +123,7 @@ AgentInteractions(
 ),
 RankedRolesPerInteraction AS (
     /*
-     3. MATCH INTERACTION TO ACTIVE ROLE
+     4. MATCH INTERACTION TO ACTIVE ROLE
      Joins interactions with role history.
      Uses ROW_NUMBER to find the MOST RECENT role assignment relative to the interaction date.
      */
@@ -127,7 +142,7 @@ RankedRolesPerInteraction AS (
         ) AS RoleRank
     FROM
         AgentInteractions
-        INNER JOIN ParticipatingRoles AS Roles ON AgentInteractions.TicketObjectId = Roles.TicketObjectId
+        INNER JOIN PaddedParticipatingRoles AS Roles ON AgentInteractions.TicketObjectId = Roles.TicketObjectId
     WHERE
         -- Ensure we only look at roles assigned BEFORE or AT the same time as the interaction
         Roles.ValidFrom <= AgentInteractions.CreatedDate
@@ -135,7 +150,7 @@ RankedRolesPerInteraction AS (
         Roles.RoleId IS NOT NULL
 )
 /*
- 4. FINAL OUTPUT
+ 5. FINAL OUTPUT
  Filters for Rank 1 to retrieve only the single active role for that specific interaction.
  */
 SELECT
