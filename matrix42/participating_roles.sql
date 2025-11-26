@@ -10,7 +10,7 @@ WITH ParticipatingRoles(TicketObjectId, ValidFrom, RoleId) AS (
         SPSActivityClassUnitOfWork AS CreateJournal
     WHERE
         ActivityAction = 1 -- Ticket Creation in Service Desk
-        OR ActivityAction = 18 -- Ticket Creation in Self Service Portal
+        OR ActivityAction = 19 -- Ticket Creation in Self Service Portal
     UNION
     SELECT
         [Expression-ObjectID],

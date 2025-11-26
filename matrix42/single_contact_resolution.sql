@@ -1,5 +1,6 @@
 WITH ParticipatingUsers(TicketObjectId, UserId) AS (
-    /* 1. HISTORY OF USER ASSIGNMENTS
+    /*
+     1. HISTORY OF USER ASSIGNMENTS
      Reconstructs the timeline of which User was assigned to a ticket.
      Might parse XML 'SolutionParams' to find the Target User ID.
      */
