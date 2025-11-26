@@ -78,18 +78,6 @@ SELECT
     LocalTicketWorkingTimes.ID,
     LocalTicketWorkingTimes.StartDateLocal,
     LocalTicketWorkingTimes.EndDateLocal,
-    /*CAST(
-     DATEDIFF(
-     minute,
-     LocalTicketWorkingTimes.StartDateLocal,
-     LocalTicketWorkingTimes.EndDateLocal
-     ) / 60.0 AS DECIMAL(10, 2)
-     ) AS GrossTurnaroundHours,*/
-    /*DATEDIFF(
-     DAY,
-     CAST(LocalTicketWorkingTimes.StartDateLocal AS DATE),
-     CAST(LocalTicketWorkingTimes.EndDateLocal AS DATE)
-     ) + 1 AS GrossTurnaroundDays,*/
     CAST(
         SUM(
             CASE
