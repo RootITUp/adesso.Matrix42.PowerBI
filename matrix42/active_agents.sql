@@ -155,9 +155,9 @@ RankedRolesPerInteraction AS (
  */
 SELECT
     CAST(InteractionDate AS date) AS [Date],
-    Creator,
+    Creator AS UserId,
     RoleId,
-    COUNT(*) AS InteractionCount
+    COUNT(*) AS JournalInteractions
 FROM
     RankedRolesPerInteraction
 WHERE
